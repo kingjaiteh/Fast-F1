@@ -2,10 +2,7 @@ import os
 
 import pytest
 
-from fastf1.testing import (
-    enable_terminal_size_mock,
-    enable_test_cache
-)
+import fastf1.testing
 
 
 ERGAST_BACKEND_OVERRIDE = os.environ.get("FASTF1_TEST_ERGAST_BACKEND_OVERRIDE")
@@ -36,6 +33,12 @@ def pytest_addoption(parser):
              "is highly discouraged"
     )
 
+    parser.addoption(
+        "--create-http-cache", action="store_true", default=False,
+        help="Create the HTTP cache or update it if it already exists. "
+             "Expired/unused responses will be deleted."
+    )
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers",
@@ -47,6 +50,32 @@ def pytest_configure(config):
                             "structure")
     config.addinivalue_line("markers",
                             "slow: extremely slow tests (multiple minutes)")
+
+    if config.getoption("--create-http-cache"):
+        if config.getoption("dist", "no") != "no":
+            raise RuntimeError(
+                "--create-http-cache must not be run with xdist"
+            )
+        fastf1.testing.CREATE_HTTP_CACHE = True
+
+    fastf1.testing.enable_test_cache()
+
+    # Delete cached function output (stage 2), so that all http requests
+    # access the Cache to renew the entries if necessary. The HTTP cache
+    # itself is not deleted!
+    from fastf1 import Cache
+    Cache.clear_cache()
+
+
+def pytest_unconfigure(config):
+    if config.getoption("--create-http-cache"):
+        # When running in cache creation mode, delete all expired responses
+        # before exiting. Assume that no response that was accessed during
+        # the test run can be expired since a test run is relatively quick.
+        # Therefore, all expired responses are unneeded for the tests.
+        fastf1.testing.enable_test_cache()
+        from fastf1 import Cache
+        Cache._requests_session_cached.cache.delete(expired=True)
 
 
 def pytest_collection_modifyitems(config, items):
@@ -103,7 +132,7 @@ def reference_laps_data():
     # provides a reference instance of session and laps to tests which
     # require it
     import fastf1
-    fastf1.Cache.enable_cache("test_cache/")
+    fastf1.Cache.configure(cache_dir="test_cache/")
     session = fastf1.get_session(2020, "Italy", "R")
     session.load()
     return session, session.laps
@@ -113,7 +142,7 @@ def reference_laps_data():
 def fastf1_setup():
     from fastf1.logger import LoggingManager
 
-    enable_test_cache()
+    fastf1.testing.enable_test_cache()
 
     LoggingManager.debug = True  # raise all exceptions
 
@@ -124,4 +153,4 @@ def automock_terminal_size(doctest_namespace):  # noqa: ARG001
     # all tests but not to the pytest result output in the terminal.
     # Requiring the doctest_namespace fixture ensures that the patch also
     # applies to doctests.
-    enable_terminal_size_mock()
+    fastf1.testing.enable_terminal_size_mock()

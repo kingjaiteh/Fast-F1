@@ -251,7 +251,8 @@ class Cache(metaclass=_MetaCache):
         cache_dir: str | None = None,
         force_renew: bool = False,
         ignore_version: bool = False,
-        use_requests_cache: bool = True
+        use_requests_cache: bool = True,
+        _backend: str | None = None,
     ):
         sanitized_cached_dir = cls._ensure_cache_directory(cache_dir)
         if sanitized_cached_dir is None:
@@ -265,13 +266,14 @@ class Cache(metaclass=_MetaCache):
             req_cache_file = os.path.join(
                 sanitized_cached_dir, "fastf1_http_cache"
             )
+            _backend = _backend or "sqlite"
             cls._requests_session_cached = _CachedSessionWithRateLimiting(
                 cache_name=req_cache_file,
-                backend="sqlite",
+                backend=_backend,
                 allowable_methods=("GET", "POST"),
                 expire_after=datetime.timedelta(hours=12),
                 cache_control=True,
-                stale_if_error=True
+                stale_if_error=True,
             )
             if force_renew:
                 cls._requests_session_cached.cache.clear()

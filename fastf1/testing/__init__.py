@@ -8,6 +8,7 @@ from typing import Callable
 
 
 _MP_CONFIGURED = False
+CREATE_HTTP_CACHE = False
 
 
 class SubprocessTestError(Exception):
@@ -27,7 +28,13 @@ def subprocess_wrapper(*func_args,
                        __mock_terminal_size,
                        __raise_soft_exceptions,
                        __patch_cache_error_responses,
+                       __create_http_cache,
                        **func_kwargs):
+    if __create_http_cache:
+        # needs to be set first
+        global CREATE_HTTP_CACHE
+        CREATE_HTTP_CACHE = True
+
     if __use_default_cache:
         enable_test_cache()
     if __mock_terminal_size:
@@ -89,7 +96,8 @@ def run_in_subprocess(
         '__use_default_cache': use_default_cache,
         '__mock_terminal_size': mock_terminal_size,
         '__raise_soft_exceptions': raise_soft_exceptions,
-        '__patch_cache_error_responses': patch_cache_error_responses
+        '__patch_cache_error_responses': patch_cache_error_responses,
+        '__create_http_cache': CREATE_HTTP_CACHE,
     })
 
     prcs = multiprocessing.Process(
@@ -155,15 +163,18 @@ def enable_test_cache():
     import fastf1
 
     try:
-        fastf1.Cache.configure(cache_dir='test_cache')
+        fastf1.Cache.configure(cache_dir='test_cache',
+                               _backend='filesystem')
     except NotADirectoryError:
         # create the test cache and re-enable
         os.mkdir('test_cache')
-        fastf1.Cache.configure(cache_dir='test_cache')
+        fastf1.Cache.configure(cache_dir='test_cache',
+                               _backend='filesystem')
 
-    # Ensure that tests make no actual requests and only run with prepared
-    # test data for reliability and repeatability.
-    fastf1.Cache.offline_mode(True)
+    if not CREATE_HTTP_CACHE:
+        # Ensure that tests make no actual requests and only run with prepared
+        # test data for reliability and repeatability.
+        fastf1.Cache.offline_mode(True)
 
 
 def enable_terminal_size_mock():
