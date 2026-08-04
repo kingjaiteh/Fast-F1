@@ -30,9 +30,6 @@ In the root directory of your development repository run::
    python -m pytest
 
 
-pytest expects the cache directory :file:`test_cache/` to exist. You will have to create it the first time.
-
-
 pytest can be configured via a lot of `command-line parameters`_. Some
 particularly useful ones are:
 
@@ -50,7 +47,87 @@ not need to be installed, but FastF1 should be)::
   pytest fastf1/tests/test_events.py::test_event_get_session_date
 
 
+In addition, the following FastF1-specific options are available:
+
+===========================  ===========
+``--no-f1-tel-api``          Skip tests that use data from the F1 telemetry
+                             API
+``--ergast-api``             Run the tests that use data from the Ergast API
+                             (skipped by default)
+``--prj-doc``                Run *only* the tests for project structure and
+                             documentation
+``--slow``                   Run the extremely slow tests as well (this may
+                             take 30 minutes or more)
+``--create-http-cache``      Record missing test data from the live APIs,
+                             see :ref:`testing_test_data`
+===========================  ===========
+
+
 .. _command-line parameters: http://doc.pytest.org/en/latest/usage.html
+
+
+.. _testing_test_data:
+
+Test data
+---------
+
+The tests never make requests to the live APIs. They run against a frozen
+snapshot of previously recorded API responses instead, so that test results are
+reproducible and independent of the availability of the API servers.
+
+This test data lives in a separate repository,
+`fastf1-test-data <https://github.com/theOehrly/fastf1-test-data>`_, which is
+included as a git submodule in :file:`test_data/`. Fetch it before running the
+tests for the first time::
+
+   git submodule update --init --depth 1
+
+The commit of the submodule that is referenced by FastF1 is part of every
+FastF1 commit. Checking out an older version of FastF1 and updating the
+submodule therefore gives you exactly the test data that this version was
+tested against.
+
+The directory :file:`test_cache/` is used for FastF1's own parsed-data cache
+while the tests run. It is not version controlled and can be deleted at any
+time.
+
+
+Adding test data
+................
+
+If a test fails because no test data is available for a request, pytest will
+report the affected URLs at the end of the test run. This usually means that
+the submodule is out of date, so try running
+``git submodule update --init --depth 1`` first.
+
+If you write a test that requires data which has not been recorded yet, you
+need to record it. **Please first check whether you can write your test based
+on a session that is already part of the test data.** Loading a single
+additional race session adds roughly 30 MB of data that everybody who
+contributes to FastF1 needs to download.
+
+To record the missing data, run the affected tests with::
+
+   python -m pytest --create-http-cache fastf1/tests/test_my_new_test.py
+
+Only the missing responses are requested from the API; data that is already
+available is never re-downloaded. The new responses are written to
+:file:`test_data/http_cache/`, where they show up as untracked files.
+
+Because :file:`test_data/` is a submodule, these files need to be contributed
+to the ``fastf1-test-data`` repository:
+
+#. Fork `fastf1-test-data <https://github.com/theOehrly/fastf1-test-data>`_,
+   commit the new files inside :file:`test_data/` and open a pull request.
+#. Once it is merged, update your submodule to the merged commit and commit
+   the updated submodule reference in your FastF1 pull request.
+
+The second step is required: the continuous integration tests resolve the
+submodule against the main ``fastf1-test-data`` repository, so they cannot see
+data that only exists in a fork.
+
+If you are unsure about any of this, just open your FastF1 pull request and
+ask. Recording the data can also be done for you.
 
 
 Linting - Code style tests

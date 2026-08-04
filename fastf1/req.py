@@ -15,6 +15,7 @@ from typing import (
 
 import requests
 from requests_cache import CacheMixin
+from requests_cache.backends.base import BaseCache
 
 from fastf1.exceptions import RateLimitExceededError
 from fastf1.logger import get_logger
@@ -252,7 +253,7 @@ class Cache(metaclass=_MetaCache):
         force_renew: bool = False,
         ignore_version: bool = False,
         use_requests_cache: bool = True,
-        _backend: str | None = None,
+        _backend: str | BaseCache | None = None,
     ):
         sanitized_cached_dir = cls._ensure_cache_directory(cache_dir)
         if sanitized_cached_dir is None:
@@ -263,17 +264,22 @@ class Cache(metaclass=_MetaCache):
         cls._FORCE_RENEW = force_renew
 
         if use_requests_cache:
-            req_cache_file = os.path.join(
-                sanitized_cached_dir, "fastf1_http_cache"
-            )
-            _backend = _backend or "sqlite"
+            if isinstance(_backend, BaseCache):
+                # a preconfigured backend defines its own storage location,
+                # therefore no cache name may be given here
+                name_kwargs = {}
+            else:
+                name_kwargs = {"cache_name": os.path.join(
+                    sanitized_cached_dir, "fastf1_http_cache"
+                )}
+
             cls._requests_session_cached = _CachedSessionWithRateLimiting(
-                cache_name=req_cache_file,
-                backend=_backend,
+                backend=_backend or "sqlite",
                 allowable_methods=("GET", "POST"),
                 expire_after=datetime.timedelta(hours=12),
                 cache_control=True,
                 stale_if_error=True,
+                **name_kwargs,
             )
             if force_renew:
                 cls._requests_session_cached.cache.clear()
@@ -348,16 +354,36 @@ class Cache(metaclass=_MetaCache):
         except TypeError:
             warnings.warn("You are using an outdated version of "
                           "requests-cache. Consider upgrading.", UserWarning)
+            if cls._requests_session_cached.settings.only_if_cached:
+                # in offline mode the response cannot be requested again, so
+                # deleting it would only destroy data that cannot be restored
+                raise
             cls._requests_session_cached.cache.delete(urls=[url])
             response = func(url, **kwargs)
+
+        if ((response.status_code == 504)
+                and (cls._requests_session_cached.settings.only_if_cached
+                     or kwargs.get("only_if_cached"))):
+            # Offline mode and no cached response is available. The caller may
+            # still be able to recover from this (e.g. by trying a mirror), so
+            # this is only logged and never raised.
+            _logger.warning(f"Offline mode is enabled but no cached response "
+                            f"is available for '{url}'")
+
         return response
 
     @classmethod
     def delete_response(cls, url: str):
         """Deletes a single cached response from the cache, if caching is
-        enabled. If caching is not enabled, this call is ignored."""
-        if cls._requests_session_cached is not None:
-            cls._requests_session_cached.cache.delete(urls=[url])
+        enabled. If caching is not enabled, this call is ignored.
+
+        Cached responses are never deleted in offline mode, because they
+        cannot be requested again."""
+        if cls._requests_session_cached is None:
+            return
+        if cls._requests_session_cached.settings.only_if_cached:
+            return
+        cls._requests_session_cached.cache.delete(urls=[url])
 
     @classmethod
     def clear_cache(
